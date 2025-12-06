@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Agentic Flowchart Generator</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    .app-container { display: flex; height: 100vh; }
+    .sidebar { width: 350px; background: #f7f8fa; border-right: 1px solid #e0e0e0; display: flex; flex-direction: column; }
+    .sidebar-header { padding: 20px; border-bottom: 1px solid #e0e0e0; }
+    .brand { font-size: 18px; font-weight: 600; display: flex; align-items: center; }
+    .dot { width: 10px; height: 10px; background: #10b981; border-radius: 50%; margin-right: 8px; }
+    .sidebar-content { flex: 1; padding: 20px; overflow-y: auto; }
+    .step { margin-bottom: 25px; }
+    .step label { display: block; margin-bottom: 8px; font-weight: 500; color: #374151; }
+    textarea { width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; resize: vertical; }
+    .mono { font-family: 'Courier New', monospace; font-size: 12px; }
+    .btn-group { display: flex; gap: 10px; }
+    .btn { padding: 10px 16px; border: none; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary { background: #3b82f6; color: white; }
+    .btn-primary:hover:not(:disabled) { background: #2563eb; }
+    .btn-secondary { background: #6b7280; color: white; }
+    .btn-secondary:hover:not(:disabled) { background: #4b5563; }
+    .btn-success { background: #10b981; color: white; }
+    .btn-success:hover:not(:disabled) { background: #059669; }
+    .status-bar { padding: 12px 20px; background: #1f2937; color: white; font-size: 13px; }
+    .main-view { flex: 1; position: relative; background: #fff; }
+    #drawio-frame { width: 100%; height: 100%; border: none; }
+    .overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.9); display: none; align-items: center; justify-content: center; z-index: 100; }
+    .overlay.active { display: flex; }
+    .spinner { width: 40px; height: 40px; border: 4px solid #f3f4f6; border-top-color: #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<div class="app-container">
+  
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <div class="brand"><span class="dot"></span> Agentic Flowchart</div>
+    </div>
+    
+    <div class="sidebar-content">
+      <div class="step">
+        <label>1. Instruction</label>
+        <textarea id="instruction" rows="4" placeholder="e.g. User login flow with password reset..."></textarea>
+        <div class="btn-group" style="margin-top: 10px;">
+          <button class="btn btn-primary" onclick="askPlan()">Create Plan</button>
+          <button class="btn btn-secondary" onclick="clearAll()" id="btn-reset">Reset</button>
+        </div>
+      </div>
+
+      <div class="step">
+        <label>2. Review Plan (Editable)</label>
+        <textarea id="plan" rows="8" class="mono" placeholder="Plan will appear here..."></textarea>
+      </div>
+
+      <div class="step">
+        <label>3. Diagram</label>
+        <div class="btn-group">
+          <button class="btn btn-success" onclick="generateXml()" id="btn-generate">Generate Diagram</button>
+          <button class="btn btn-secondary" onclick="toggleXmlView()" id="btn-toggle-xml">Show/Hide XML</button>
+        </div>
+        <textarea id="xml" rows="10" class="mono" style="display:none; margin-top:10px;" placeholder="Generated XML will appear here..."></textarea>
+        <button class="btn btn-primary" onclick="updateDiagram()" id="btn-update" style="display:none; width:100%; margin-top:10px;">Update Diagram from XML</button>
+      </div>
+      
+      <div class="step">
+        <form action="/download" method="POST" target="_blank" onsubmit="return prepDownload(event)">
+          <input type="hidden" name="xml" id="downloadXml">
+          <button type="submit" class="btn btn-secondary" style="width:100%" id="btn-download">Download .drawio file</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="status-bar" id="status">Initializing...</div>
+  </div>
+
+  <div class="main-view">
+    <div class="overlay" id="loader"><div class="spinner"></div></div>
+    <iframe id="drawio-frame" src="about:blank"></iframe>
+  </div>
+
+</div>
+
+<script>
+  // Global variables
+  const statusEl = document.getElementById('status');
+  const loader = document.getElementById('loader');
+  const frame = document.getElementById('drawio-frame');
+  const xmlTextarea = document.getElementById('xml');
+  const btnUpdate = document.getElementById('btn-update');
+  
+  let drawioWindow = null;
+  let drawioOrigin = 'https://embed.diagrams.net';
+  
+  // Initialize Draw.io iframe
+  function initDrawio() {
+    console.log('Initializing Draw.io...');
+    frame.src = `${drawioOrigin}/?embed=1&ui=min&noSaveBtn=1&noExitBtn=1&proto=json&spin=1&libraries=1`;
+    setStatus("Loading Draw.io editor...");
+  }
+  
+  // Handle messages from Draw.io
+  window.addEventListener('message', function(evt) {
+    if (evt.origin !== drawioOrigin) return;
+    
+    if (evt.data.length > 1) {
+      try {
+        var msg = JSON.parse(evt.data);
+        
+        if (msg.event == 'init') {
+          drawioWindow = frame.contentWindow;
+          console.log('Draw.io initialized successfully');
+          setStatus("Ready");
+          // Load blank diagram
+          loadDiagram('<mxfile><diagram name="Page-1"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel></diagram></mxfile>');
+        }
+        else if (msg.event == 'load') {
+          console.log('Diagram loaded');
+          loader.classList.remove('active');
+        }
+      } catch (e) {
+        console.error('Error parsing message:', e);
+      }
+    }
+  });
+  
+  // Load diagram into Draw.io
+  function loadDiagram(xml) {
+    if (!drawioWindow) {
+      console.log('Draw.io not ready, retrying in 500ms...');
+      setTimeout(() => loadDiagram(xml), 500);
+      return;
+    }
+    
+    console.log('Loading diagram XML...');
+    drawioWindow.postMessage(JSON.stringify({
+      action: 'load',
+      autosave: 0,
+      xml: xml
+    }), drawioOrigin);
+  }
+  
+  function setStatus(msg, isLoading = false) {
+    statusEl.textContent = msg;
+    if (isLoading) {
+      loader.classList.add('active');
+    } else {
+      loader.classList.remove('active');
+    }
+  }
+  
+  function toggleXmlView() {
+    const isVisible = xmlTextarea.style.display !== 'none';
+    xmlTextarea.style.display = isVisible ? 'none' : 'block';
+    btnUpdate.style.display = isVisible ? 'none' : 'block';
+  }
+  
+  function updateDiagram() {
+    const xml = xmlTextarea.value.trim();
+    if (!xml) {
+      alert("No XML to update");
+      return;
+    }
+    setStatus("Updating diagram...", true);
+    loadDiagram(xml);
+    setTimeout(() => setStatus("Diagram updated"), 500);
+  }
+  
+  async function askPlan() {
+    const text = document.getElementById('instruction').value.trim();
+    if (!text) {
+      alert("Please enter instructions.");
+      return;
+    }
+    
+    setStatus("Creating plan...", true);
+    
+    try {
+      const formData = new FormData();
+      formData.append('instruction', text);
+      const res = await fetch('/api/plan', { method: 'POST', body: formData });
+      
+      if (!res.ok) throw new Error('Failed to create plan');
+      
+      const data = await res.json();
+      document.getElementById('plan').value = data.plan;
+      setStatus("Plan created. Click 'Generate Diagram'");
+    } catch (e) {
+      alert('Error: ' + e.message);
+      setStatus("Error creating plan");
+    }
+  }
+  
+  async function generateXml() {
+    const plan = document.getElementById('plan').value.trim();
+    if (!plan) {
+      alert("Please create a plan first.");
+      return;
+    }
+    
+    setStatus("Generating diagram...", true);
+    
+    try {
+      const formData = new FormData();
+      formData.append('plan', plan);
+      const res = await fetch('/api/xml', { method: 'POST', body: formData });
+      
+      if (!res.ok) throw new Error('Failed to generate XML');
+      
+      const data = await res.json();
+      const xml = data.xml;
+      
+      console.log('Generated XML:', xml.substring(0, 200) + '...');
+      
+      // Show XML in textarea
+      xmlTextarea.value = xml;
+      xmlTextarea.style.display = 'block';
+      btnUpdate.style.display = 'block';
+      
+      // Load into Draw.io
+      loadDiagram(xml);
+      setStatus("Diagram generated!");
+      
+    } catch (e) {
+      alert('Error: ' + e.message);
+      setStatus("Error generating diagram");
+    }
+  }
+  
+  function clearAll() {
+    document.getElementById('instruction').value = "";
+    document.getElementById('plan').value = "";
+    xmlTextarea.value = "";
+    xmlTextarea.style.display = 'none';
+    btnUpdate.style.display = 'none';
+    
+    loadDiagram('<mxfile><diagram name="Page-1"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel></diagram></mxfile>');
+    setStatus("Ready");
+  }
+  
+  function prepDownload(event) {
+    const xml = xmlTextarea.value;
+    if (!xml) {
+      alert("Please generate a diagram first.");
+      event.preventDefault();
+      return false;
+    }
+    document.getElementById('downloadXml').value = xml;
+    return true;
+  }
+  
+  // Start initialization when page loads
+  window.addEventListener('load', function() {
+    initDrawio();
+  });
+</script>
+
+</body>
+</html>
