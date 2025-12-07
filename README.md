@@ -33,6 +33,7 @@ pip install flask openai python-dotenv
 OPENAI_API_KEY=your_openai_api_key_here
 ```
 for local server uncomment these two lines: 
+
           # from dotenv import load_dotenv
 
           # load_dotenv()
