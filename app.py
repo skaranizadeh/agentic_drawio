@@ -1,13 +1,25 @@
 import os, re, json, xml.etree.ElementTree as ET
 from flask import Flask, render_template, request, jsonify, Response, send_from_directory
 from openai import OpenAI
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 
-load_dotenv()
+#load_dotenv()
 
 # ---------- Configuration ----------
 app = Flask(__name__)
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Read the key from the environment variable (Render, Heroku, etc.)
+OPENAI_KEY = os.environ.get("OPENAI_API_KEY")
+
+if not OPENAI_KEY:
+    # This check runs both locally (if not in .env) and on the server (if not set)
+    print("ERROR: OPENAI_API_KEY not found in environment variables!")
+    # Depending on how critical the key is, you might exit the app here:
+    # exit(1) 
+    
+# Initialize the OpenAI client using the key from the environment
+client = OpenAI(api_key=OPENAI_KEY)
+
 
 MODEL_FOR_PLAN = "gpt-4o-mini"
 MODEL_FOR_XML  = "gpt-4o-mini"
